@@ -1,0 +1,63 @@
+name: Daily PE Multiples Monitor
+
+# Scheduled workflows always run on the default branch, so chart URLs
+# (raw.githubusercontent.com/<repo>/<default-branch>/charts/...) resolve once
+# this is merged to the default branch. Use "Run workflow" to test on a branch.
+on:
+  schedule:
+    - cron: "30 12 * * 1-5"   # 12:30 UTC, Mon-Fri (after the dashboard rebuilds)
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to push the freshly rendered charts
+
+concurrency:
+  group: pe-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    env:
+      CHART_MODE: url
+      # ---- thresholds (override here or leave for sensible defaults) ----
+      SINGLE_Z: "2.0"
+      SINGLE_MIN_PCT: "10"
+      PAIR_Z: "2.0"
+      PAIR_DEV_PCT: "15"
+      PAIR_IC_MIN: "0.30"
+      PAIR_HIT_MIN: "60"
+      # ---- email ----
+      BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+      MAIL_TO: ${{ vars.MAIL_TO }}
+      MAIL_SENDER_EMAIL: ${{ vars.MAIL_SENDER_EMAIL }}
+      MAIL_SENDER_NAME: ${{ vars.MAIL_SENDER_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Build report + charts
+        run: python -m pe_monitor build
+
+      - name: Commit charts so their URLs go live
+        run: |
+          git config user.name  "pe-monitor-bot"
+          git config user.email "actions@github.com"
+          # keep only the most recent 14 days of charts to avoid bloat
+          ls -1dt charts/*/ 2>/dev/null | tail -n +15 | xargs -r rm -rf
+          git add charts
+          if git diff --staged --quiet; then
+            echo "no chart changes"
+          else
+            git commit -m "chore: PE monitor charts $(date -u +%F)"
+            for i in 1 2 3 4; do git push && break || sleep $((2**i)); done
+          fi
+
+      - name: Send email
+        run: python -m pe_monitor send
