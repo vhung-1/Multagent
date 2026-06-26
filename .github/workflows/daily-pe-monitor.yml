@@ -7,13 +7,6 @@ on:
   schedule:
     - cron: "30 12 * * 1-5"   # 12:30 UTC, Mon-Fri (after the dashboard rebuilds)
   workflow_dispatch:
-  # TEMPORARY: one-off validation trigger. Ignores charts/** so the job's own
-  # chart commit does not re-trigger the workflow. Remove after testing.
-  push:
-    branches:
-      - claude/pe-multiples-monitoring-agent-tcwc58
-    paths-ignore:
-      - "charts/**"
 
 permissions:
   contents: write   # needed to push the freshly rendered charts
