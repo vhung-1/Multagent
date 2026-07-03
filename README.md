@@ -18,11 +18,15 @@ It watches for two kinds of dislocation:
 
 ## What the email looks like
 
+The report is **organised by sub-sector** and walks through every one of them
+(Exchanges, Info Services, Payments & Fintech, M&A Boutiques, Alternatives,
+Traditional AM, Wealth & Brokers), so no sector is silently skipped:
+
 - Header + one-line summary (how many names / pairs breached thresholds).
-- **Single-name** section: charts of the most-stretched names (P/E history with
-  the average and ±1σ/±2σ bands) followed by a full table.
-- **Pair-trade** section: charts of the most-dislocated reliable pairs
-  (deviation-from-average history) followed by a table with the suggested trade.
+- For **each sub-sector**: its single-name dislocations (chart of the most
+  stretched + table) and its pair-trade dislocations (chart + table with the
+  suggested trade). Sub-sectors with nothing beyond thresholds are shown
+  explicitly as "no dislocations today".
 - Methodology footer + link back to the live dashboard.
 
 ## How it works
@@ -75,8 +79,12 @@ both in one process.
 ## Daily automation (GitHub Actions)
 
 The workflow [`.github/workflows/daily-pe-monitor.yml`](.github/workflows/daily-pe-monitor.yml)
-runs every weekday at 12:30 UTC: it builds the report, commits the day's charts
-(so their URLs go live), then sends the email.
+runs **every morning** (11:26 UTC), but only does work when there is new data:
+it first probes the dashboard's `asof` and compares it to the last processed
+snapshot in `state/last_asof.txt`. If unchanged, it exits quietly (no email). If
+the core data was refreshed, it builds the report, commits the day's charts +
+updated state (so chart URLs go live), then sends the email. Use **Run
+workflow** with `force: true` to send regardless.
 
 One-time setup in the repo:
 

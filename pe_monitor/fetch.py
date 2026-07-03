@@ -32,6 +32,12 @@ def _get_json(url: str) -> Any:
     return resp.json()
 
 
+def fetch_asof(base_url: str) -> str:
+    """Cheap freshness probe: read just the snapshot date from api.json (~5KB)."""
+    base = base_url.rstrip("/") + "/"
+    return _get_json(base + "api.json")["asof"]
+
+
 def load_dashboard(base_url: str) -> Dashboard:
     base = base_url.rstrip("/") + "/"
     data = _get_json(base + "data.json")

@@ -1,12 +1,18 @@
 name: Daily PE Multiples Monitor
 
+# Runs every morning but only builds + emails when the dashboard's `asof` has
+# changed since the last processed snapshot (tracked in state/last_asof.txt).
 # Scheduled workflows always run on the default branch, so chart URLs
-# (raw.githubusercontent.com/<repo>/<default-branch>/charts/...) resolve once
-# this is merged to the default branch. Use "Run workflow" to test on a branch.
+# (raw.githubusercontent.com/<repo>/<default-branch>/charts/...) resolve there.
 on:
   schedule:
-    - cron: "30 12 * * 1-5"   # 12:30 UTC, Mon-Fri (after the dashboard rebuilds)
+    - cron: "26 11 * * *"   # 11:26 UTC daily (~7am ET) — gate below skips no-new-data days
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Send even if the data hasn't changed"
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # needed to push the freshly rendered charts
@@ -42,22 +48,33 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      - name: Check for new data
+        id: check
+        run: python -m pe_monitor check
+
       - name: Build report + charts
+        if: steps.check.outputs.new_data == 'true' || inputs.force
         run: python -m pe_monitor build
 
-      - name: Commit charts so their URLs go live
+      - name: Commit charts + state so URLs go live
+        if: steps.check.outputs.new_data == 'true' || inputs.force
         run: |
           git config user.name  "pe-monitor-bot"
           git config user.email "actions@github.com"
           # keep only the most recent 14 days of charts to avoid bloat
           ls -1dt charts/*/ 2>/dev/null | tail -n +15 | xargs -r rm -rf
-          git add charts
+          git add charts state
           if git diff --staged --quiet; then
-            echo "no chart changes"
+            echo "nothing to commit"
           else
-            git commit -m "chore: PE monitor charts $(date -u +%F)"
+            git commit -m "chore: PE monitor ${{ steps.check.outputs.asof }}"
             for i in 1 2 3 4; do git push && break || sleep $((2**i)); done
           fi
 
       - name: Send email
+        if: steps.check.outputs.new_data == 'true' || inputs.force
         run: python -m pe_monitor send
+
+      - name: No new data
+        if: steps.check.outputs.new_data != 'true' && ! inputs.force
+        run: echo "Dashboard asof unchanged (${{ steps.check.outputs.asof }}); nothing to send."

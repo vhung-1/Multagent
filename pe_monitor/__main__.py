@@ -1,12 +1,14 @@
 """CLI entry point.
 
 Commands:
-  build  fetch data, compute signals, render charts + out/email.html
+  check  probe the dashboard's `asof`; report whether it is new vs. the last
+         processed snapshot (used by CI to gate the daily run)
+  build  fetch data, compute signals, render charts + out/email.html, and
+         record the processed `asof` in the state file
   send   send the previously built email via Brevo
   run    build then send in one process (handy locally / with datauri charts)
 
-The GitHub Action runs `build`, commits the charts so their URLs go live, then
-runs `send`.
+The GitHub Action runs `check` (gate) -> `build` -> commit charts+state -> `send`.
 """
 from __future__ import annotations
 
@@ -18,7 +20,41 @@ import sys
 from . import analyze, charts, render
 from .brevo import send_email
 from .config import Config
-from .fetch import load_dashboard
+from .fetch import fetch_asof, load_dashboard
+
+
+def _read_state(path: str) -> str:
+    try:
+        with open(path) as fh:
+            return fh.read().strip()
+    except FileNotFoundError:
+        return ""
+
+
+def _write_state(path: str, asof: str) -> None:
+    d = os.path.dirname(path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write(asof + "\n")
+
+
+def _emit_github_output(**kv: str) -> None:
+    gh = os.environ.get("GITHUB_OUTPUT")
+    if not gh:
+        return
+    with open(gh, "a") as fh:
+        for k, v in kv.items():
+            fh.write(f"{k}={v}\n")
+
+
+def _check(cfg: Config) -> bool:
+    asof = fetch_asof(cfg.base_url)
+    last = _read_state(cfg.state_file)
+    is_new = asof != last
+    print(f"dashboard asof={asof} last_processed={last or '(none)'} new_data={is_new}")
+    _emit_github_output(new_data="true" if is_new else "false", asof=asof)
+    return is_new
 
 
 def _build(cfg: Config) -> dict:
@@ -31,19 +67,19 @@ def _build(cfg: Config) -> dict:
     charts.ensure_dir(charts_day_dir)
     charts.ensure_dir(cfg.out_dir)
 
+    # Chart the top item per signal for each sub-sector (per-sector coverage).
     chart_files: dict[str, str] = {}  # chart_id -> file path
-
-    for a in single[:cfg.top_charts_single]:
-        cid = render.chart_id_single(a)
-        fp = os.path.join(charts_day_dir, cid + ".png")
-        charts.single_chart(dash, a, fp)
-        chart_files[cid] = fp
-
-    for p in pairs[:cfg.top_charts_pair]:
-        cid = render.chart_id_pair(p)
-        fp = os.path.join(charts_day_dir, cid + ".png")
-        charts.pair_chart(p, fp)
-        chart_files[cid] = fp
+    for sec in dash.sectors.keys():
+        for a in [x for x in single if x.sector == sec][:cfg.charts_single_per_sector]:
+            cid = render.chart_id_single(a)
+            fp = os.path.join(charts_day_dir, cid + ".png")
+            charts.single_chart(dash, a, fp)
+            chart_files[cid] = fp
+        for p in [x for x in pairs if x.sector == sec][:cfg.charts_pair_per_sector]:
+            cid = render.chart_id_pair(p)
+            fp = os.path.join(charts_day_dir, cid + ".png")
+            charts.pair_chart(p, fp)
+            chart_files[cid] = fp
 
     # Resolve how the email references each chart.
     mode = cfg.chart_mode
@@ -70,7 +106,11 @@ def _build(cfg: Config) -> dict:
     with open(os.path.join(cfg.out_dir, "meta.json"), "w") as fh:
         json.dump(meta, fh)
 
-    print(f"wrote {html_path} ({len(chart_files)} charts under {charts_day_dir})")
+    # Record this snapshot as processed so the daily gate won't re-fire on it.
+    _write_state(cfg.state_file, dash.asof)
+
+    print(f"wrote {html_path} ({len(chart_files)} charts under {charts_day_dir}); "
+          f"state -> {cfg.state_file}")
     return meta
 
 
@@ -92,11 +132,13 @@ def _send(cfg: Config) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pe_monitor")
-    parser.add_argument("command", choices=["build", "send", "run"])
+    parser.add_argument("command", choices=["check", "build", "send", "run"])
     args = parser.parse_args(argv)
     cfg = Config()
 
-    if args.command == "build":
+    if args.command == "check":
+        _check(cfg)
+    elif args.command == "build":
         _build(cfg)
     elif args.command == "send":
         _send(cfg)

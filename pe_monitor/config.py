@@ -46,9 +46,10 @@ class Config:
     pair_hit_min: float = field(default_factory=lambda: _f("PAIR_HIT_MIN", 60.0))
     pair_min_nq: int = field(default_factory=lambda: _i("PAIR_MIN_NQ", 6))
 
-    # ---- How many alerts get a chart in the email -------------------------
-    top_charts_single: int = field(default_factory=lambda: _i("TOP_CHARTS_SINGLE", 4))
-    top_charts_pair: int = field(default_factory=lambda: _i("TOP_CHARTS_PAIR", 4))
+    # ---- Charts: the report is organised by sub-sector, so these are the
+    #      number of charts drawn PER sub-sector for each signal -------------
+    charts_single_per_sector: int = field(default_factory=lambda: _i("CHARTS_SINGLE_PER_SECTOR", 1))
+    charts_pair_per_sector: int = field(default_factory=lambda: _i("CHARTS_PAIR_PER_SECTOR", 1))
 
     # ---- Output / chart hosting -------------------------------------------
     out_dir: str = field(default_factory=lambda: _s("OUT_DIR", "out"))
@@ -67,6 +68,11 @@ class Config:
     mail_sender_name: str = field(default_factory=lambda: _s("MAIL_SENDER_NAME", "PE Multiples Monitor"))
     # Send the email even when nothing breaches thresholds (a quiet "all clear").
     send_when_empty: bool = field(default_factory=lambda: _s("SEND_WHEN_EMPTY", "true").lower() == "true")
+
+    # ---- New-data gating ---------------------------------------------------
+    # Tracks the last dashboard `asof` we processed so the daily job only acts
+    # when the core data has actually been refreshed. Committed to the repo.
+    state_file: str = field(default_factory=lambda: _s("STATE_FILE", "state/last_asof.txt"))
 
     def resolve_chart_base_url(self, asof: str) -> str:
         """Absolute base URL under which the day's charts will be reachable."""
